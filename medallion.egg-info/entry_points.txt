@@ -1,0 +1,2 @@
+[console_scripts]
+medallion = medallion.cli:main
