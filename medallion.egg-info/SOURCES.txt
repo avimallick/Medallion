@@ -1,5 +1,15 @@
+LICENSE
+MANIFEST.in
 README.md
 pyproject.toml
+examples/python_examples.py
+examples/research_and_answer/config.yaml
+examples/research_and_answer/workflow.yaml
+examples/research_and_answer/agents/analyzer.yaml
+examples/research_and_answer/agents/planner.yaml
+examples/research_and_answer/agents/researcher.yaml
+examples/research_and_answer/agents/reviewer.yaml
+examples/research_and_answer/agents/writer.yaml
 medallion/__init__.py
 medallion/cli.py
 medallion.egg-info/PKG-INFO
@@ -13,5 +23,6 @@ medallion/core/agent.py
 medallion/core/client.py
 medallion/core/knowledge_graph.py
 medallion/core/workflow.py
+medallion/providers/__init__.py
 medallion/providers/ollama.py
 medallion/providers/openai.py

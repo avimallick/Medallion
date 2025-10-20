@@ -159,3 +159,14 @@ See the `examples/` directory for:
 ## 📄 License
 
 MIT License - see LICENSE file for details.
+
+## 🐳 Docker
+
+Build a container with the Go backend bundled into the Python package.
+
+
+
+Notes:
+- Multi-stage Dockerfile builds the Go CLI and installs the Python package.
+- Final image: python:3.12-slim.
+-  keeps the image lean.

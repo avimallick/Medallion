@@ -1,0 +1,16 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.env
+.venv
+.dist
+build/
+dist/
+*.egg-info/
+node_modules/
+*.log
+**/test*
+examples/
