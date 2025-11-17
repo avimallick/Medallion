@@ -238,6 +238,88 @@ async def test_checkpoint_session_end_to_end(in_memory_store: SQLiteMedallionSto
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_session_update_flow_no_duplication(in_memory_store: SQLiteMedallionStore) -> None:
+    """Test checkpoint_session update flow ensures no duplication (Phase 6 - US3).
+
+    This test specifically verifies that:
+    1. Creating a medallion, then calling checkpoint_session with same scope updates it (not duplicates)
+    2. Multiple updates preserve created_at and update updated_at
+    3. Only one medallion exists for the scope after updates
+    """
+    from medallion.llm import StubMedallionLLM
+    from medallion.session import _checkpoint_session_async
+
+    scope = MedallionScope(
+        graph_nodes=["repo:muse", "module:cli"],
+        tags=["project_state", "refactor"],
+    )
+
+    llm = StubMedallionLLM()
+
+    # Initial checkpoint - creates new medallion
+    evidence1 = Evidence(
+        session_summary="Initial checkpoint",
+        transcripts=["transcript 1"],
+        artefacts={"initial": "data"},
+    )
+    medallion1 = await _checkpoint_session_async(in_memory_store, llm, scope, evidence1)
+    original_id = medallion1.meta.medallion_id
+    original_created_at = medallion1.meta.created_at
+    original_updated_at = medallion1.meta.updated_at
+
+    # Verify initial state - one medallion exists
+    all_medallions = await in_memory_store.get_latest_for_scope(scope, limit=10)
+    assert len(all_medallions) == 1
+    assert all_medallions[0].meta.medallion_id == original_id
+
+    # Second checkpoint with same scope - should UPDATE, not create new
+    evidence2 = Evidence(
+        session_summary="Second checkpoint - should update",
+        transcripts=["transcript 2"],
+        artefacts={"updated": "data"},
+    )
+    medallion2 = await _checkpoint_session_async(in_memory_store, llm, scope, evidence2)
+
+    # Verify: Same ID (not duplicated)
+    assert medallion2.meta.medallion_id == original_id
+
+    # Verify: created_at preserved, updated_at changed
+    assert medallion2.meta.created_at == original_created_at
+    assert medallion2.meta.updated_at > original_updated_at
+
+    # Verify: Still only one medallion exists (no duplication)
+    all_medallions_after_update = await in_memory_store.get_latest_for_scope(scope, limit=10)
+    assert len(all_medallions_after_update) == 1
+    assert all_medallions_after_update[0].meta.medallion_id == original_id
+
+    # Third checkpoint - should update again
+    evidence3 = Evidence(
+        session_summary="Third checkpoint - should update again",
+        transcripts=["transcript 3"],
+        artefacts={"updated_again": "data"},
+    )
+    medallion3 = await _checkpoint_session_async(in_memory_store, llm, scope, evidence3)
+
+    # Verify: Same ID still
+    assert medallion3.meta.medallion_id == original_id
+
+    # Verify: created_at still preserved, updated_at increased again
+    assert medallion3.meta.created_at == original_created_at
+    assert medallion3.meta.updated_at > medallion2.meta.updated_at
+
+    # Verify: Still only one medallion (definitely no duplication after multiple updates)
+    all_medallions_final = await in_memory_store.get_latest_for_scope(scope, limit=10)
+    assert len(all_medallions_final) == 1
+    assert all_medallions_final[0].meta.medallion_id == original_id
+
+    # Verify: Timestamps are correct (created_at < updated_at)
+    final_retrieved = await in_memory_store.get_by_id(original_id)
+    assert final_retrieved is not None
+    assert final_retrieved.meta.created_at < final_retrieved.meta.updated_at
+    assert final_retrieved.meta.created_at == original_created_at
+
+
+@pytest.mark.asyncio
 async def test_load_medallions_for_scope_end_to_end(in_memory_store: SQLiteMedallionStore) -> None:
     """Test load_medallions_for_scope end-to-end with real SQLite store."""
     from medallion.session import _load_medallions_for_scope_async
@@ -290,4 +372,122 @@ async def test_load_medallions_for_scope_end_to_end(in_memory_store: SQLiteMedal
     )
     empty_results = await _load_medallions_for_scope_async(in_memory_store, non_matching_scope, limit=10)
     assert empty_results == []
+
+
+@pytest.mark.asyncio
+async def test_graph_anchored_queries_complex_scenarios(in_memory_store: SQLiteMedallionStore) -> None:
+    """Test graph-anchored queries with complex scenarios (Phase 7 - US4).
+
+    Creates multiple medallions with different scopes and verifies subset queries
+    return only relevant medallions.
+    """
+    from medallion.session import _load_medallions_for_scope_async
+
+    now = datetime.now()
+
+    # Create medallions with different graph node combinations
+    medallions_config = [
+        {
+            "id": "med-graph-1",
+            "nodes": ["repo:muse", "module:cli"],
+            "tags": ["project_state"],
+        },
+        {
+            "id": "med-graph-2",
+            "nodes": ["repo:muse", "module:cli", "module:store"],
+            "tags": ["project_state", "refactor"],
+        },
+        {
+            "id": "med-graph-3",
+            "nodes": ["repo:other", "module:api"],
+            "tags": ["project_state"],
+        },
+        {
+            "id": "med-graph-4",
+            "nodes": ["repo:muse"],
+            "tags": ["project_state"],
+        },
+        {
+            "id": "med-graph-5",
+            "nodes": ["repo:muse", "module:cli", "module:store", "module:api"],
+            "tags": ["refactor"],
+        },
+    ]
+
+    for i, config in enumerate(medallions_config):
+        scope = MedallionScope(
+            graph_nodes=config["nodes"],
+            tags=config["tags"],
+        )
+        meta = MedallionMeta(
+            medallion_id=config["id"],
+            model="gpt-4",
+            created_at=now + timedelta(seconds=i),
+            updated_at=now + timedelta(seconds=i),
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=scope,
+            summary=MedallionSummary(high_level=f"Graph test {i}", subsystems=[]),
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        await in_memory_store.create(medallion)
+
+    # Scenario 1: Query for repo:muse only (should match 1, 2, 4, 5)
+    query1 = MedallionScope(
+        graph_nodes=["repo:muse"],
+        tags=["project_state"],
+    )
+    results1 = await _load_medallions_for_scope_async(in_memory_store, query1, limit=10)
+    ids1 = {m.meta.medallion_id for m in results1}
+    assert "med-graph-1" in ids1
+    assert "med-graph-2" in ids1
+    assert "med-graph-4" in ids1
+    assert "med-graph-3" not in ids1  # Different repo
+    assert "med-graph-5" not in ids1  # Different tag
+
+    # Scenario 2: Query for repo:muse + module:cli (should match 1, 2)
+    query2 = MedallionScope(
+        graph_nodes=["repo:muse", "module:cli"],
+        tags=["project_state"],
+    )
+    results2 = await _load_medallions_for_scope_async(in_memory_store, query2, limit=10)
+    ids2 = {m.meta.medallion_id for m in results2}
+    assert "med-graph-1" in ids2
+    assert "med-graph-2" in ids2
+    assert "med-graph-4" not in ids2  # Missing module:cli
+    assert "med-graph-3" not in ids2  # Different repo
+
+    # Scenario 3: Query for tag-only (refactor) - should match 2, 5
+    query3 = MedallionScope(
+        graph_nodes=[],  # Empty nodes
+        tags=["refactor"],
+    )
+    results3 = await _load_medallions_for_scope_async(in_memory_store, query3, limit=10)
+    ids3 = {m.meta.medallion_id for m in results3}
+    assert "med-graph-2" in ids3
+    assert "med-graph-5" in ids3
+    assert len(ids3) == 2
+
+    # Scenario 4: Query for complex subset (repo:muse + module:cli + module:store)
+    # Should match med-graph-2 (has all three) and med-graph-5 (has all three)
+    query4 = MedallionScope(
+        graph_nodes=["repo:muse", "module:cli", "module:store"],
+        tags=["project_state"],
+    )
+    results4 = await _load_medallions_for_scope_async(in_memory_store, query4, limit=10)
+    ids4 = {m.meta.medallion_id for m in results4}
+    assert "med-graph-2" in ids4
+    assert "med-graph-1" not in ids4  # Missing module:store
+    assert "med-graph-4" not in ids4  # Missing module:cli and module:store
+
+    # Scenario 5: Query with no matching nodes (should return empty)
+    query5 = MedallionScope(
+        graph_nodes=["repo:nonexistent"],
+        tags=["project_state"],
+    )
+    results5 = await _load_medallions_for_scope_async(in_memory_store, query5, limit=10)
+    assert len(results5) == 0
 

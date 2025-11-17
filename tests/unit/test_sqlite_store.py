@@ -596,6 +596,246 @@ class TestSQLiteMedallionStoreGetLatestForScope:
         for i in range(len(results) - 1):
             assert results[i].meta.updated_at >= results[i + 1].meta.updated_at
 
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_tag_intersection_matching(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test that get_latest_for_scope uses intersection matching for tags (any overlap)."""
+        now = datetime.now()
+
+        # Create medallion with multiple tags
+        scope1 = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state", "refactor", "backend"],
+        )
+        meta1 = MedallionMeta(
+            medallion_id="med-tags-1",
+            model="gpt-4",
+            created_at=now,
+            updated_at=now,
+        )
+        medallion1 = Medallion(
+            meta=meta1,
+            scope=scope1,
+            summary=MedallionSummary(high_level="Multiple tags", subsystems=[]),
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        await in_memory_store.create(medallion1)
+
+        # Query with one overlapping tag (should match)
+        query_scope = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["refactor"],  # One tag overlaps
+        )
+        results = await in_memory_store.get_latest_for_scope(query_scope, limit=10)
+        assert len(results) == 1
+        assert results[0].meta.medallion_id == "med-tags-1"
+
+        # Query with multiple overlapping tags (should match)
+        query_scope2 = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state", "refactor"],  # Two tags overlap
+        )
+        results2 = await in_memory_store.get_latest_for_scope(query_scope2, limit=10)
+        assert len(results2) == 1
+        assert results2[0].meta.medallion_id == "med-tags-1"
+
+        # Query with no overlapping tags (should not match)
+        query_scope3 = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["frontend"],  # No overlap
+        )
+        results3 = await in_memory_store.get_latest_for_scope(query_scope3, limit=10)
+        assert len(results3) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_tag_only_query(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test that get_latest_for_scope works with tag-only queries (no graph_nodes)."""
+        now = datetime.now()
+
+        # Create medallions with different tags but same graph_nodes
+        scope1 = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+        scope2 = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["refactor"],
+        )
+
+        for i, scope in enumerate([scope1, scope2]):
+            meta = MedallionMeta(
+                medallion_id=f"med-tag-only-{i:03d}",
+                model="gpt-4",
+                created_at=now + timedelta(seconds=i),
+                updated_at=now + timedelta(seconds=i),
+            )
+            medallion = Medallion(
+                meta=meta,
+                scope=scope,
+                summary=MedallionSummary(high_level=f"Tag test {i}", subsystems=[]),
+                decisions=[],
+                open_questions=[],
+                affordances=MedallionAffordances(),
+            )
+            await in_memory_store.create(medallion)
+
+        # Query with empty graph_nodes but specific tag (should match)
+        query_scope = MedallionScope(
+            graph_nodes=[],  # Empty nodes
+            tags=["project_state"],  # Tag match
+        )
+        results = await in_memory_store.get_latest_for_scope(query_scope, limit=10)
+        assert len(results) == 1
+        assert results[0].meta.medallion_id == "med-tag-only-000"
+
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_complex_graph_node_scenarios(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test complex graph node scenarios: multiple nodes, partial matches, superset queries."""
+        now = datetime.now()
+
+        # Create medallions with different graph node combinations
+        medallions_data = [
+            {
+                "id": "med-complex-1",
+                "nodes": ["repo:muse", "module:cli"],
+                "tags": ["project_state"],
+            },
+            {
+                "id": "med-complex-2",
+                "nodes": ["repo:muse", "module:cli", "module:store"],
+                "tags": ["project_state"],
+            },
+            {
+                "id": "med-complex-3",
+                "nodes": ["repo:other", "module:cli"],
+                "tags": ["project_state"],
+            },
+            {
+                "id": "med-complex-4",
+                "nodes": ["repo:muse"],
+                "tags": ["project_state"],
+            },
+        ]
+
+        for i, data in enumerate(medallions_data):
+            scope = MedallionScope(
+                graph_nodes=data["nodes"],
+                tags=data["tags"],
+            )
+            meta = MedallionMeta(
+                medallion_id=data["id"],
+                model="gpt-4",
+                created_at=now + timedelta(seconds=i),
+                updated_at=now + timedelta(seconds=i),
+            )
+            medallion = Medallion(
+                meta=meta,
+                scope=scope,
+                summary=MedallionSummary(high_level=f"Complex test {i}", subsystems=[]),
+                decisions=[],
+                open_questions=[],
+                affordances=MedallionAffordances(),
+            )
+            await in_memory_store.create(medallion)
+
+        # Query 1: Request nodes that are subset of stored nodes (should match)
+        query1 = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],
+            tags=["project_state"],
+        )
+        results1 = await in_memory_store.get_latest_for_scope(query1, limit=10)
+        # Should match: med-complex-1 (exact match), med-complex-2 (has both + more)
+        # Should NOT match: med-complex-4 (only has repo:muse, missing module:cli)
+        assert len(results1) >= 2
+        ids1 = {m.meta.medallion_id for m in results1}
+        assert "med-complex-1" in ids1
+        assert "med-complex-2" in ids1
+        assert "med-complex-4" not in ids1  # Missing module:cli (requested is not subset of stored)
+        assert "med-complex-3" not in ids1  # Different repo
+
+        # Query 2: Request single node (should match all with that node)
+        query2 = MedallionScope(
+            graph_nodes=["module:cli"],
+            tags=["project_state"],
+        )
+        results2 = await in_memory_store.get_latest_for_scope(query2, limit=10)
+        # Should match: med-complex-1, med-complex-2, med-complex-3 (all have module:cli)
+        assert len(results2) >= 3
+        ids2 = {m.meta.medallion_id for m in results2}
+        assert "med-complex-1" in ids2
+        assert "med-complex-2" in ids2
+        assert "med-complex-3" in ids2
+
+        # Query 3: Request superset (should not match - subset matching means requested must be subset of stored)
+        query3 = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli", "module:store", "module:api"],
+            tags=["project_state"],
+        )
+        results3 = await in_memory_store.get_latest_for_scope(query3, limit=10)
+        # Should not match any (none have all 4 nodes)
+        assert len(results3) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_partial_node_match(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test partial node matching - some nodes match, some don't."""
+        now = datetime.now()
+
+        # Create medallion with specific nodes
+        stored_scope = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],
+            tags=["project_state"],
+        )
+        meta = MedallionMeta(
+            medallion_id="med-partial",
+            model="gpt-4",
+            created_at=now,
+            updated_at=now,
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=stored_scope,
+            summary=MedallionSummary(high_level="Partial match test", subsystems=[]),
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        await in_memory_store.create(medallion)
+
+        # Query with one matching node (should match - subset)
+        query1 = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+        results1 = await in_memory_store.get_latest_for_scope(query1, limit=10)
+        assert len(results1) == 1
+        assert results1[0].meta.medallion_id == "med-partial"
+
+        # Query with both matching nodes (should match - exact subset)
+        query2 = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],
+            tags=["project_state"],
+        )
+        results2 = await in_memory_store.get_latest_for_scope(query2, limit=10)
+        assert len(results2) == 1
+        assert results2[0].meta.medallion_id == "med-partial"
+
+        # Query with non-matching node (should not match)
+        query3 = MedallionScope(
+            graph_nodes=["repo:other"],
+            tags=["project_state"],
+        )
+        results3 = await in_memory_store.get_latest_for_scope(query3, limit=10)
+        assert len(results3) == 0
+
 
 class TestSQLiteMedallionStoreProtocol:
     """Tests verifying SQLiteMedallionStore satisfies MedallionStore Protocol."""
