@@ -1,5 +1,0 @@
-include README.md
-include LICENSE
-recursive-include medallion/bin *
-recursive-include examples *
-prune test*
