@@ -452,6 +452,150 @@ class TestSQLiteMedallionStoreGetLatestForScope:
         results = await in_memory_store.get_latest_for_scope(scope_no_tags, limit=10)
         assert len(results) >= 1
 
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_exact_match(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test that get_latest_for_scope returns medallions with exact matching scope."""
+        now = datetime.now()
+        scope = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],
+            tags=["project_state", "refactor"],
+        )
+
+        # Create medallion with exact same scope
+        meta = MedallionMeta(
+            medallion_id="med-exact",
+            model="gpt-4",
+            created_at=now,
+            updated_at=now,
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=scope,
+            summary=MedallionSummary(high_level="Exact match", subsystems=[]),
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        await in_memory_store.create(medallion)
+
+        # Query with exact same scope
+        results = await in_memory_store.get_latest_for_scope(scope, limit=10)
+        assert len(results) == 1
+        assert results[0].meta.medallion_id == "med-exact"
+        assert results[0].scope.graph_nodes == scope.graph_nodes
+        assert results[0].scope.tags == scope.tags
+
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_subset_match(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test that get_latest_for_scope returns medallions when requested graph_nodes are subset of stored."""
+        now = datetime.now()
+        # Create medallion with multiple graph_nodes
+        stored_scope = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli", "module:store"],
+            tags=["project_state"],
+        )
+
+        meta = MedallionMeta(
+            medallion_id="med-subset",
+            model="gpt-4",
+            created_at=now,
+            updated_at=now,
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=stored_scope,
+            summary=MedallionSummary(high_level="Subset match test", subsystems=[]),
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        await in_memory_store.create(medallion)
+
+        # Query with subset of graph_nodes (should match)
+        requested_scope = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],  # Subset of stored nodes
+            tags=["project_state"],
+        )
+        results = await in_memory_store.get_latest_for_scope(requested_scope, limit=10)
+        assert len(results) == 1
+        assert results[0].meta.medallion_id == "med-subset"
+
+        # Query with single node subset (should match)
+        requested_scope2 = MedallionScope(
+            graph_nodes=["repo:muse"],  # Single node, subset of stored
+            tags=["project_state"],
+        )
+        results2 = await in_memory_store.get_latest_for_scope(requested_scope2, limit=10)
+        assert len(results2) == 1
+        assert results2[0].meta.medallion_id == "med-subset"
+
+    @pytest.mark.asyncio
+    async def test_get_latest_for_scope_ordering(
+        self, in_memory_store: SQLiteMedallionStore
+    ) -> None:
+        """Test that get_latest_for_scope orders results by updated_at DESC."""
+        base_time = datetime.now()
+        scope = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+
+        # Create medallions with different timestamps (oldest first)
+        medallions = []
+        for i in range(3):
+            meta = MedallionMeta(
+                medallion_id=f"med-order-{i:03d}",
+                model="gpt-4",
+                created_at=base_time + timedelta(seconds=i),
+                updated_at=base_time + timedelta(seconds=i),  # Earlier timestamps first
+            )
+            medallion = Medallion(
+                meta=meta,
+                scope=scope,
+                summary=MedallionSummary(high_level=f"Order test {i}", subsystems=[]),
+                decisions=[],
+                open_questions=[],
+                affordances=MedallionAffordances(),
+            )
+            medallions.append(medallion)
+            await in_memory_store.create(medallion)
+
+        # Update middle medallion to make it most recent
+        most_recent = medallions[1]
+        updated_meta = MedallionMeta(
+            medallion_id=most_recent.meta.medallion_id,
+            model=most_recent.meta.model,
+            created_at=most_recent.meta.created_at,
+            updated_at=base_time + timedelta(seconds=10),  # Most recent
+            status="active",
+        )
+        updated_medallion = Medallion(
+            meta=updated_meta,
+            scope=most_recent.scope,
+            summary=most_recent.summary,
+            decisions=most_recent.decisions,
+            open_questions=most_recent.open_questions,
+            affordances=most_recent.affordances,
+        )
+        await in_memory_store.update(updated_medallion)
+
+        # Query - results should be ordered by updated_at DESC (most recent first)
+        results = await in_memory_store.get_latest_for_scope(scope, limit=10)
+        assert len(results) == 3
+
+        # Verify ordering: most recent first
+        assert results[0].meta.medallion_id == "med-order-001"  # Most recent (updated)
+        assert results[0].meta.updated_at > results[1].meta.updated_at
+        assert results[1].meta.updated_at > results[2].meta.updated_at
+
+        # Verify all timestamps are descending
+        for i in range(len(results) - 1):
+            assert results[i].meta.updated_at >= results[i + 1].meta.updated_at
+
 
 class TestSQLiteMedallionStoreProtocol:
     """Tests verifying SQLiteMedallionStore satisfies MedallionStore Protocol."""

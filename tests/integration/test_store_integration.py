@@ -236,3 +236,58 @@ async def test_checkpoint_session_end_to_end(in_memory_store: SQLiteMedallionSto
     assert len(all_medallions) == 1
     assert all_medallions[0].meta.medallion_id == medallion1.meta.medallion_id
 
+
+@pytest.mark.asyncio
+async def test_load_medallions_for_scope_end_to_end(in_memory_store: SQLiteMedallionStore) -> None:
+    """Test load_medallions_for_scope end-to-end with real SQLite store."""
+    from medallion.session import _load_medallions_for_scope_async
+
+    scope = MedallionScope(
+        graph_nodes=["repo:muse"],
+        tags=["project_state"],
+    )
+    now = datetime.now()
+
+    # Create medallions with matching scope
+    for i in range(3):
+        meta = MedallionMeta(
+            medallion_id=f"med-load-{i:03d}",
+            model="gpt-4",
+            created_at=now + timedelta(seconds=i),
+            updated_at=now + timedelta(seconds=i),
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=scope,
+            summary=MedallionSummary(high_level=f"Load test {i}", subsystems=[]),
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        await in_memory_store.create(medallion)
+
+    # Load medallions using async helper (from async test)
+    results = await _load_medallions_for_scope_async(in_memory_store, scope, limit=10)
+
+    # Verify results
+    assert len(results) == 3
+    assert all(m.scope.graph_nodes == scope.graph_nodes for m in results)
+    assert all(m.scope.tags == scope.tags for m in results)
+    assert all(m.meta.status == "active" for m in results)
+
+    # Verify ordering (should be DESC by updated_at)
+    for i in range(len(results) - 1):
+        assert results[i].meta.updated_at >= results[i + 1].meta.updated_at
+
+    # Test with limit
+    limited_results = await _load_medallions_for_scope_async(in_memory_store, scope, limit=2)
+    assert len(limited_results) == 2
+
+    # Test with non-matching scope
+    non_matching_scope = MedallionScope(
+        graph_nodes=["repo:other"],
+        tags=["different"],
+    )
+    empty_results = await _load_medallions_for_scope_async(in_memory_store, non_matching_scope, limit=10)
+    assert empty_results == []
+
