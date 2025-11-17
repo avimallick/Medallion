@@ -44,7 +44,23 @@ class LLMError(MedallionError):
 
 # Core Types
 class MedallionScope(BaseModel):
-    """Scope defining what a medallion applies to."""
+    """Scope defining what a medallion applies to.
+
+    The scope is used to query and match medallions. It consists of:
+    - graph_nodes: Subset matching (requested nodes must be subset of stored nodes)
+    - tags: Intersection matching (any tag overlap returns match)
+
+    Example:
+        ```python
+        from medallion import MedallionScope
+
+        # Define scope with graph nodes and tags
+        scope = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],
+            tags=["project_state", "refactor"],
+        )
+        ```
+    """
 
     graph_nodes: List[str] = Field(
         default_factory=list,
@@ -160,7 +176,38 @@ class MedallionMeta(BaseModel):
 
 
 class Medallion(BaseModel):
-    """A semantic checkpoint for LLM agents."""
+    """A semantic checkpoint for LLM agents.
+
+    A medallion represents a structured checkpoint of reasoning state for LLM agents.
+    It contains metadata, scope, summary, decisions, open questions, and affordances
+    that enable agents to resume work from previous sessions.
+
+    Example:
+        ```python
+        from medallion import Medallion, MedallionScope, MedallionSummary
+        from datetime import datetime
+
+        scope = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+        summary = MedallionSummary(high_level="Project overview")
+        meta = MedallionMeta(
+            medallion_id="med-001",
+            model="gpt-4",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=scope,
+            summary=summary,
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        ```
+    """
 
     meta: MedallionMeta = Field(description="Metadata about this medallion")
     scope: MedallionScope = Field(description="Scope this medallion applies to")
@@ -257,7 +304,25 @@ class Medallion(BaseModel):
 
 
 class Evidence(BaseModel):
-    """Evidence data for generating or updating a medallion."""
+    """Evidence data for generating or updating a medallion.
+
+    Evidence is the input data used to create or update a medallion. It contains
+    session summary, transcripts, and artefacts from the agent session.
+
+    Example:
+        ```python
+        from medallion import Evidence
+
+        evidence = Evidence(
+            session_summary="Implemented CLI module with command routing",
+            transcripts=[
+                "User: Add help command",
+                "Agent: Implementing help command with routing",
+            ],
+            artefacts={"commands": ["help", "start", "stop"]},
+        )
+        ```
+    """
 
     session_summary: str = Field(
         description="High-level description of what happened this session"

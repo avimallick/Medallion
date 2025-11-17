@@ -89,7 +89,24 @@ class MedallionLLM(Protocol):
 
 
 class StubMedallionLLM:
-    """Stub implementation of MedallionLLM for testing."""
+    """Stub implementation of MedallionLLM for testing.
+
+    This is a minimal implementation that returns valid medallions without
+    actually calling an LLM. Useful for testing and development.
+
+    Example:
+        ```python
+        from medallion import StubMedallionLLM, MedallionScope, Evidence
+
+        llm = StubMedallionLLM()
+
+        scope = MedallionScope(graph_nodes=["repo:muse"], tags=["test"])
+        evidence = Evidence(session_summary="Test session")
+
+        medallion = await llm.generate(scope, evidence)
+        print(f"Generated medallion: {medallion.meta.medallion_id}")
+        ```
+    """
 
     async def generate(
         self,

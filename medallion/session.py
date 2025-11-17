@@ -106,8 +106,10 @@ def checkpoint_session(
     scope: MedallionScope,
     evidence: Evidence,
 ) -> Medallion:
-    """
-    Create or update a medallion for a session (sync wrapper).
+    """Create or update a medallion for a session (sync wrapper).
+
+    This function creates a new medallion if none exists for the given scope,
+    or updates the most recent existing medallion if one is found.
 
     This is a sync wrapper around the async implementation. For async frameworks,
     use _checkpoint_session_async directly.
@@ -130,6 +132,33 @@ def checkpoint_session(
         This function uses asyncio.run() internally. If called from an async
         context (e.g., inside an async function), use _checkpoint_session_async
         directly instead.
+
+    Example:
+        ```python
+        from medallion import (
+            SQLiteMedallionStore,
+            StubMedallionLLM,
+            MedallionScope,
+            Evidence,
+            checkpoint_session,
+        )
+
+        store = SQLiteMedallionStore("medallions.db")
+        llm = StubMedallionLLM()
+
+        scope = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+        evidence = Evidence(
+            session_summary="Implemented CLI module",
+            transcripts=["User requested help command"],
+            artefacts={"commands": ["help"]},
+        )
+
+        medallion = checkpoint_session(store, llm, scope, evidence)
+        print(f"Created medallion: {medallion.meta.medallion_id}")
+        ```
     """
     return asyncio.run(_checkpoint_session_async(store, llm, scope, evidence))
 
@@ -168,8 +197,11 @@ def load_medallions_for_scope(
     scope: MedallionScope,
     limit: int = 10,
 ) -> List[Medallion]:
-    """
-    Load medallions matching a scope (sync wrapper).
+    """Load medallions matching a scope (sync wrapper).
+
+    Loads medallions that match the given scope using subset matching for
+    graph_nodes and intersection matching for tags. Results are ordered by
+    updated_at DESC (most recent first).
 
     This is a sync wrapper around the async implementation. For async frameworks,
     use _load_medallions_for_scope_async directly.
@@ -180,7 +212,7 @@ def load_medallions_for_scope(
         limit: Maximum number of medallions to return (default: 10)
 
     Returns:
-        List of matching medallions, ordered by updated_at DESC
+        List of matching medallions, ordered by updated_at DESC (most recent first)
 
     Raises:
         StoreError: If store operations fail
@@ -189,6 +221,27 @@ def load_medallions_for_scope(
         This function uses asyncio.run() internally. If called from an async
         context (e.g., inside an async function), use _load_medallions_for_scope_async
         directly instead.
+
+    Example:
+        ```python
+        from medallion import (
+            SQLiteMedallionStore,
+            MedallionScope,
+            load_medallions_for_scope,
+        )
+
+        store = SQLiteMedallionStore("medallions.db")
+
+        scope = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+
+        medallions = load_medallions_for_scope(store, scope, limit=5)
+
+        for medallion in medallions:
+            print(f"{medallion.meta.medallion_id}: {medallion.summary.high_level}")
+        ```
     """
     return asyncio.run(_load_medallions_for_scope_async(store, scope, limit))
 

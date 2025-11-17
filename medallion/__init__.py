@@ -7,20 +7,47 @@ to resume work from previous sessions with consistent state.
 
 __version__ = "0.1.0"
 
-# Package exports will be added in later phases
-# __all__ = [
-#     "Medallion",
-#     "MedallionScope",
-#     "Evidence",
-#     "MedallionStore",
-#     "SQLiteMedallionStore",
-#     "MedallionLLM",
-#     "StubMedallionLLM",
-#     "load_medallions_for_scope",
-#     "checkpoint_session",
-#     "MedallionError",
-#     "SchemaValidationError",
-#     "StoreError",
-#     "LLMError",
-# ]
+# Core types
+from medallion.types import (
+    Evidence,
+    LLMError,
+    Medallion,
+    MedallionError,
+    MedallionScope,
+    SchemaValidationError,
+    StoreError,
+)
+
+# Store interfaces and implementations
+from medallion.store import MedallionStore
+from medallion.sqlite_store import SQLiteMedallionStore
+
+# LLM interfaces and implementations
+from medallion.llm import MedallionLLM, StubMedallionLLM
+
+# Session helpers
+from medallion.session import checkpoint_session, load_medallions_for_scope
+
+__all__ = [
+    # Version
+    "__version__",
+    # Core types
+    "Medallion",
+    "MedallionScope",
+    "Evidence",
+    # Store interfaces and implementations
+    "MedallionStore",
+    "SQLiteMedallionStore",
+    # LLM interfaces and implementations
+    "MedallionLLM",
+    "StubMedallionLLM",
+    # Session helpers
+    "load_medallions_for_scope",
+    "checkpoint_session",
+    # Exception classes
+    "MedallionError",
+    "SchemaValidationError",
+    "StoreError",
+    "LLMError",
+]
 

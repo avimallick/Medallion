@@ -23,7 +23,31 @@ from medallion.types import (
 
 
 class SQLiteMedallionStore:
-    """SQLite-backed implementation of MedallionStore."""
+    """SQLite-backed implementation of MedallionStore.
+
+    This class provides a concrete SQLite implementation of the MedallionStore
+    protocol. It stores medallions in a SQLite database with efficient indexing
+    for scope-based queries.
+
+    Example:
+        ```python
+        from medallion import SQLiteMedallionStore, Medallion
+
+        # Create store with default database file
+        store = SQLiteMedallionStore("medallions.db")
+
+        # Use async context manager for automatic cleanup
+        async with SQLiteMedallionStore("medallions.db") as store:
+            # Create medallion
+            await store.create(medallion)
+
+            # Load by ID
+            retrieved = await store.get_by_id("med-001")
+
+            # Query by scope
+            medallions = await store.get_latest_for_scope(scope, limit=10)
+        ```
+    """
 
     def __init__(self, db_path: Path | str = "medallion.db") -> None:
         """
