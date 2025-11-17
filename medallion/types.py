@@ -1,0 +1,402 @@
+"""
+Medallion data types and schema definitions.
+
+This module contains all Pydantic models for the Medallion schema,
+including validation rules and custom exceptions.
+"""
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# Type aliases for better type safety
+Priority = Literal["low", "medium", "high"]
+SubsystemStatus = Literal["unknown", "stable", "in_progress", "deprecated"]
+MedallionStatus = Literal["active", "stale", "superseded"]
+
+
+# Custom Exceptions
+class MedallionError(Exception):
+    """Base exception for Medallion operations."""
+
+    pass
+
+
+class SchemaValidationError(MedallionError):
+    """Raised when medallion schema validation fails."""
+
+    pass
+
+
+class StoreError(MedallionError):
+    """Raised when store operations fail."""
+
+    pass
+
+
+class LLMError(MedallionError):
+    """Raised when LLM operations fail."""
+
+    pass
+
+
+# Core Types
+class MedallionScope(BaseModel):
+    """Scope defining what a medallion applies to.
+
+    The scope is used to query and match medallions. It consists of:
+    - graph_nodes: Subset matching (requested nodes must be subset of stored nodes)
+    - tags: Intersection matching (any tag overlap returns match)
+
+    Example:
+        ```python
+        from medallion import MedallionScope
+
+        # Define scope with graph nodes and tags
+        scope = MedallionScope(
+            graph_nodes=["repo:muse", "module:cli"],
+            tags=["project_state", "refactor"],
+        )
+        ```
+    """
+
+    graph_nodes: list[str] = Field(
+        default_factory=list,
+        description="Array of graph node IDs (e.g., ['repo:muse', 'module:cli'])",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Array of tags for categorization (e.g., ['project_state', 'refactor_sprint_1'])",
+    )
+
+
+class MedallionDecision(BaseModel):
+    """A canonical decision about the scope."""
+
+    id: str = Field(description="Unique decision ID (e.g., 'D-001')")
+    statement: str = Field(description="Canonical decision text")
+    rationale: str = Field(description="Short explanation of why this decision was made")
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence level from 0.0 to 1.0",
+    )
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v: float) -> float:
+        """Validate confidence is between 0.0 and 1.0."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("confidence must be between 0.0 and 1.0")
+        return v
+
+
+class MedallionOpenQuestion(BaseModel):
+    """An unresolved question about the scope."""
+
+    id: str = Field(description="Unique question ID (e.g., 'Q-003')")
+    question: str = Field(description="The question text")
+    blocked_on: list[str] = Field(
+        default_factory=list,
+        description="List of dependencies blocking resolution (e.g., ['benchmark', 'team_input'])",
+    )
+    priority: Priority = Field(description="Priority level: low, medium, or high")
+
+
+class MedallionAffordances(BaseModel):
+    """Guidance for how agents should use this medallion."""
+
+    recommended_entry_points: list[str] = Field(
+        default_factory=list,
+        description="Suggested starting points (e.g., ['Start from module:llm-router'])",
+    )
+    avoid_repeating: list[str] = Field(
+        default_factory=list,
+        description="Actions to avoid repeating (e.g., ['Do not re-run full repo scan'])",
+    )
+    invariants: list[str] | None = Field(
+        default=None,
+        description="Optional rules agents must obey",
+    )
+
+
+class Subsystem(BaseModel):
+    """Subsystem status information."""
+
+    name: str = Field(description="Subsystem name")
+    status: SubsystemStatus = Field(description="Current status of the subsystem")
+    notes: str = Field(description="Additional notes about the subsystem")
+
+
+class MedallionSummary(BaseModel):
+    """High-level summary of the scope."""
+
+    high_level: str = Field(
+        max_length=300,
+        description="High-level summary (<= 300 tokens recommended)",
+    )
+    subsystems: list[Subsystem] = Field(
+        default_factory=list,
+        description="List of subsystems with their status",
+    )
+
+
+class MedallionMeta(BaseModel):
+    """Metadata about the medallion."""
+
+    medallion_id: str = Field(description="Unique identifier for this medallion")
+    schema_version: str = Field(
+        default="medallion.v1",
+        description="Schema version (e.g., 'medallion.v1')",
+    )
+    model: str = Field(description="Model used to generate/update this medallion")
+    created_at: datetime = Field(description="ISO 8601 timestamp of creation")
+    updated_at: datetime = Field(description="ISO 8601 timestamp of last update")
+    knowledge_min_ts: datetime | None = Field(
+        default=None,
+        description="Earliest data timestamp covered by this medallion",
+    )
+    knowledge_max_ts: datetime | None = Field(
+        default=None,
+        description="Latest data timestamp covered (e.g., repo commit time)",
+    )
+    status: MedallionStatus = Field(
+        default="active",
+        description="Current status: active, stale, or superseded",
+    )
+
+    @model_validator(mode="after")
+    def validate_timestamps(self) -> "MedallionMeta":
+        """Ensure updated_at is >= created_at."""
+        if self.updated_at < self.created_at:
+            raise ValueError("updated_at must be >= created_at")
+        return self
+
+
+class Medallion(BaseModel):
+    """A semantic checkpoint for LLM agents.
+
+    A medallion represents a structured checkpoint of reasoning state for LLM agents.
+    It contains metadata, scope, summary, decisions, open questions, and affordances
+    that enable agents to resume work from previous sessions.
+
+    Example:
+        ```python
+        from medallion import Medallion, MedallionScope, MedallionSummary
+        from datetime import datetime
+
+        scope = MedallionScope(
+            graph_nodes=["repo:muse"],
+            tags=["project_state"],
+        )
+        summary = MedallionSummary(high_level="Project overview")
+        meta = MedallionMeta(
+            medallion_id="med-001",
+            model="gpt-4",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        medallion = Medallion(
+            meta=meta,
+            scope=scope,
+            summary=summary,
+            decisions=[],
+            open_questions=[],
+            affordances=MedallionAffordances(),
+        )
+        ```
+    """
+
+    meta: MedallionMeta = Field(description="Metadata about this medallion")
+    scope: MedallionScope = Field(description="Scope this medallion applies to")
+    summary: MedallionSummary = Field(description="High-level summary")
+    decisions: list[MedallionDecision] = Field(
+        default_factory=list,
+        description="Canonical decisions made about the scope",
+    )
+    open_questions: list[MedallionOpenQuestion] = Field(
+        default_factory=list,
+        description="Unresolved questions about the scope",
+    )
+    affordances: MedallionAffordances = Field(description="Guidance for agent usage")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "meta": {
+                    "medallion_id": "med-001",
+                    "schema_version": "medallion.v1",
+                    "model": "gpt-4",
+                    "created_at": "2025-01-01T12:00:00Z",
+                    "updated_at": "2025-01-01T12:00:00Z",
+                    "status": "active",
+                },
+                "scope": {
+                    "graph_nodes": ["repo:muse"],
+                    "tags": ["project_state"],
+                },
+                "summary": {
+                    "high_level": "Project Muse is a semantic checkpointing system...",
+                    "subsystems": [
+                        {
+                            "name": "Store",
+                            "status": "stable",
+                            "notes": "SQLite backend implemented",
+                        }
+                    ],
+                },
+                "decisions": [
+                    {
+                        "id": "D-001",
+                        "statement": "Use Python 3.11+",
+                        "rationale": "Modern type hints and async support",
+                        "confidence": 0.9,
+                    }
+                ],
+                "open_questions": [
+                    {
+                        "id": "Q-001",
+                        "question": "Should we add vector search?",
+                        "blocked_on": ["performance_benchmark"],
+                        "priority": "medium",
+                    }
+                ],
+                "affordances": {
+                    "recommended_entry_points": ["Start from types.py"],
+                    "avoid_repeating": ["Do not re-scan entire repo"],
+                    "invariants": ["Always validate schema before storage"],
+                },
+            }
+        }
+    )
+
+    def model_dump_json(
+        self,
+        *,
+        indent: int | None = 2,
+        ensure_ascii: bool | None = None,
+        include: Any | None = None,
+        exclude: Any | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        exclude_unset: bool | None = None,
+        exclude_defaults: bool | None = None,
+        exclude_none: bool | None = None,
+        exclude_computed_fields: bool | None = None,
+        round_trip: bool | None = None,
+        warnings: Any | None = None,
+        fallback: Any | None = None,
+        serialize_as_any: bool | None = None,
+    ) -> str:
+        """
+        Serialize medallion to JSON string.
+
+        Args:
+            indent: JSON indentation level (default: 2 for readability)
+            **kwargs: Additional arguments passed to Pydantic's model_dump_json
+
+        Returns:
+            JSON string representation of the medallion
+        """
+        # Build kwargs dict, only including non-None values
+        kwargs: dict[str, Any] = {"indent": indent}
+        if ensure_ascii is not None:
+            kwargs["ensure_ascii"] = ensure_ascii
+        if include is not None:
+            kwargs["include"] = include
+        if exclude is not None:
+            kwargs["exclude"] = exclude
+        if context is not None:
+            kwargs["context"] = context
+        if by_alias is not None:
+            kwargs["by_alias"] = by_alias
+        if exclude_unset is not None:
+            kwargs["exclude_unset"] = exclude_unset
+        if exclude_defaults is not None:
+            kwargs["exclude_defaults"] = exclude_defaults
+        if exclude_none is not None:
+            kwargs["exclude_none"] = exclude_none
+        if exclude_computed_fields is not None:
+            kwargs["exclude_computed_fields"] = exclude_computed_fields
+        if round_trip is not None:
+            kwargs["round_trip"] = round_trip
+        if warnings is not None:
+            kwargs["warnings"] = warnings
+        if fallback is not None:
+            kwargs["fallback"] = fallback
+        if serialize_as_any is not None:
+            kwargs["serialize_as_any"] = serialize_as_any
+        return super().model_dump_json(**kwargs)
+
+    @classmethod
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        extra: Any | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> "Medallion":
+        """
+        Deserialize medallion from JSON string.
+
+        Args:
+            json_data: JSON string, bytes, or bytearray to parse
+            strict: Enable strict mode for validation
+            extra: Extra field handling mode
+            context: Additional context for validation
+            by_alias: Use field aliases
+            by_name: Use field names
+
+        Returns:
+            Medallion instance
+
+        Raises:
+            ValidationError: If JSON does not conform to Medallion schema
+        """
+        return super().model_validate_json(
+            json_data,
+            strict=strict,
+            extra=extra,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
+
+
+class Evidence(BaseModel):
+    """Evidence data for generating or updating a medallion.
+
+    Evidence is the input data used to create or update a medallion. It contains
+    session summary, transcripts, and artefacts from the agent session.
+
+    Example:
+        ```python
+        from medallion import Evidence
+
+        evidence = Evidence(
+            session_summary="Implemented CLI module with command routing",
+            transcripts=[
+                "User: Add help command",
+                "Agent: Implementing help command with routing",
+            ],
+            artefacts={"commands": ["help", "start", "stop"]},
+        )
+        ```
+    """
+
+    session_summary: str = Field(
+        description="High-level description of what happened this session"
+    )
+    transcripts: list[str] | None = Field(
+        default=None,
+        description="Optional list of important conversation segments or planner steps",
+    )
+    artefacts: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional structured info (e.g., file diffs, test results)",
+    )
+
