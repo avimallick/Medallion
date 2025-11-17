@@ -8,7 +8,7 @@ including validation rules and custom exceptions.
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # Type aliases for better type safety
@@ -175,10 +175,8 @@ class Medallion(BaseModel):
     )
     affordances: MedallionAffordances = Field(description="Guidance for agent usage")
 
-    class Config:
-        """Pydantic model configuration."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "meta": {
                     "medallion_id": "med-001",
@@ -225,6 +223,7 @@ class Medallion(BaseModel):
                 },
             }
         }
+    )
 
     def model_dump_json(self, *, indent: int = 2, **kwargs: Any) -> str:
         """

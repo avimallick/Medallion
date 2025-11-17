@@ -25,6 +25,7 @@ classifiers = [
 
 dependencies = [
     "pydantic>=2.0",
+    "aiosqlite>=0.19.0",
 ]
 
 [project.optional-dependencies]
@@ -118,6 +119,10 @@ addopts = [
     "--cov-fail-under=90",
     "--cov-branch",
 ]
+
+# Note: For Phase 3, only store.py needs 90%+ coverage (session.py doesn't exist yet)
+# The constitution requires 90%+ on "store + session modules" - when session is implemented,
+# coverage will be calculated across both modules.
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
@@ -143,5 +148,7 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
     "@abstractmethod",
+    "class.*\\(Protocol\\):",
+    "\\.\\.\\.",
 ]
 

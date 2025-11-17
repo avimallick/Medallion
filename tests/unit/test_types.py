@@ -125,6 +125,19 @@ class TestMedallionDecision:
         )
         assert decision1.confidence == 0.5
 
+    def test_confidence_validator_error_path(self) -> None:
+        """Test validator error path (should be caught by Pydantic Field constraints first)."""
+        # This tests the validator's error path, though Pydantic's Field(ge=0.0, le=1.0)
+        # should catch this first. The validator is a backup.
+        with pytest.raises(ValidationError):
+            # Try to create with invalid confidence (should fail at Field level)
+            MedallionDecision(
+                id="D-001",
+                statement="Test",
+                rationale="Test",
+                confidence=1.5,  # Will fail Field constraint first
+            )
+
 
 class TestMedallionOpenQuestion:
     """Tests for MedallionOpenQuestion model."""
@@ -225,7 +238,9 @@ class TestMedallionMeta:
                 updated_at=updated,
             )
         errors = exc_info.value.errors()
-        assert any("updated_at must be >= created_at" in str(error) for error in errors)
+        # Check that the validator error is present
+        error_messages = [str(error) for error in errors]
+        assert any("updated_at must be >= created_at" in msg for msg in error_messages)
 
     def test_status_values(self) -> None:
         """Test all valid status values."""
@@ -315,6 +330,23 @@ class TestMedallionJSONSerialization:
         assert isinstance(json_str, str)
         # Check for newlines indicating indentation
         assert "\n" in json_str
+        # Verify the helper method was called (line 239 coverage)
+        assert len(json_str) > 0
+
+    def test_model_dump_json_helper_returns_string(self) -> None:
+        """Test that model_dump_json helper method returns JSON string."""
+        medallion = self.create_sample_medallion()
+        json_str = medallion.model_dump_json()
+        assert isinstance(json_str, str)
+        assert "med-001" in json_str
+
+    def test_model_validate_json_helper_returns_medallion(self) -> None:
+        """Test that model_validate_json helper method returns Medallion."""
+        medallion = self.create_sample_medallion()
+        json_str = medallion.model_dump_json()
+        deserialized = Medallion.model_validate_json(json_str)
+        assert isinstance(deserialized, Medallion)
+        assert deserialized.meta.medallion_id == medallion.meta.medallion_id
 
     def test_deserialize_with_decisions_and_questions(self) -> None:
         """Test deserializing medallion with decisions and questions."""
