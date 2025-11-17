@@ -6,10 +6,9 @@ including validation rules and custom exceptions.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 # Type aliases for better type safety
 Priority = Literal["low", "medium", "high"]
@@ -62,11 +61,11 @@ class MedallionScope(BaseModel):
         ```
     """
 
-    graph_nodes: List[str] = Field(
+    graph_nodes: list[str] = Field(
         default_factory=list,
         description="Array of graph node IDs (e.g., ['repo:muse', 'module:cli'])",
     )
-    tags: List[str] = Field(
+    tags: list[str] = Field(
         default_factory=list,
         description="Array of tags for categorization (e.g., ['project_state', 'refactor_sprint_1'])",
     )
@@ -98,7 +97,7 @@ class MedallionOpenQuestion(BaseModel):
 
     id: str = Field(description="Unique question ID (e.g., 'Q-003')")
     question: str = Field(description="The question text")
-    blocked_on: List[str] = Field(
+    blocked_on: list[str] = Field(
         default_factory=list,
         description="List of dependencies blocking resolution (e.g., ['benchmark', 'team_input'])",
     )
@@ -108,15 +107,15 @@ class MedallionOpenQuestion(BaseModel):
 class MedallionAffordances(BaseModel):
     """Guidance for how agents should use this medallion."""
 
-    recommended_entry_points: List[str] = Field(
+    recommended_entry_points: list[str] = Field(
         default_factory=list,
         description="Suggested starting points (e.g., ['Start from module:llm-router'])",
     )
-    avoid_repeating: List[str] = Field(
+    avoid_repeating: list[str] = Field(
         default_factory=list,
         description="Actions to avoid repeating (e.g., ['Do not re-run full repo scan'])",
     )
-    invariants: Optional[List[str]] = Field(
+    invariants: list[str] | None = Field(
         default=None,
         description="Optional rules agents must obey",
     )
@@ -137,7 +136,7 @@ class MedallionSummary(BaseModel):
         max_length=300,
         description="High-level summary (<= 300 tokens recommended)",
     )
-    subsystems: List[Subsystem] = Field(
+    subsystems: list[Subsystem] = Field(
         default_factory=list,
         description="List of subsystems with their status",
     )
@@ -154,11 +153,11 @@ class MedallionMeta(BaseModel):
     model: str = Field(description="Model used to generate/update this medallion")
     created_at: datetime = Field(description="ISO 8601 timestamp of creation")
     updated_at: datetime = Field(description="ISO 8601 timestamp of last update")
-    knowledge_min_ts: Optional[datetime] = Field(
+    knowledge_min_ts: datetime | None = Field(
         default=None,
         description="Earliest data timestamp covered by this medallion",
     )
-    knowledge_max_ts: Optional[datetime] = Field(
+    knowledge_max_ts: datetime | None = Field(
         default=None,
         description="Latest data timestamp covered (e.g., repo commit time)",
     )
@@ -212,11 +211,11 @@ class Medallion(BaseModel):
     meta: MedallionMeta = Field(description="Metadata about this medallion")
     scope: MedallionScope = Field(description="Scope this medallion applies to")
     summary: MedallionSummary = Field(description="High-level summary")
-    decisions: List[MedallionDecision] = Field(
+    decisions: list[MedallionDecision] = Field(
         default_factory=list,
         description="Canonical decisions made about the scope",
     )
-    open_questions: List[MedallionOpenQuestion] = Field(
+    open_questions: list[MedallionOpenQuestion] = Field(
         default_factory=list,
         description="Unresolved questions about the scope",
     )
@@ -272,7 +271,24 @@ class Medallion(BaseModel):
         }
     )
 
-    def model_dump_json(self, *, indent: int = 2, **kwargs: Any) -> str:
+    def model_dump_json(
+        self,
+        *,
+        indent: int | None = 2,
+        ensure_ascii: bool | None = None,
+        include: Any | None = None,
+        exclude: Any | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        exclude_unset: bool | None = None,
+        exclude_defaults: bool | None = None,
+        exclude_none: bool | None = None,
+        exclude_computed_fields: bool | None = None,
+        round_trip: bool | None = None,
+        warnings: Any | None = None,
+        fallback: Any | None = None,
+        serialize_as_any: bool | None = None,
+    ) -> str:
         """
         Serialize medallion to JSON string.
 
@@ -283,16 +299,57 @@ class Medallion(BaseModel):
         Returns:
             JSON string representation of the medallion
         """
-        return super().model_dump_json(indent=indent, **kwargs)
+        # Build kwargs dict, only including non-None values
+        kwargs: dict[str, Any] = {"indent": indent}
+        if ensure_ascii is not None:
+            kwargs["ensure_ascii"] = ensure_ascii
+        if include is not None:
+            kwargs["include"] = include
+        if exclude is not None:
+            kwargs["exclude"] = exclude
+        if context is not None:
+            kwargs["context"] = context
+        if by_alias is not None:
+            kwargs["by_alias"] = by_alias
+        if exclude_unset is not None:
+            kwargs["exclude_unset"] = exclude_unset
+        if exclude_defaults is not None:
+            kwargs["exclude_defaults"] = exclude_defaults
+        if exclude_none is not None:
+            kwargs["exclude_none"] = exclude_none
+        if exclude_computed_fields is not None:
+            kwargs["exclude_computed_fields"] = exclude_computed_fields
+        if round_trip is not None:
+            kwargs["round_trip"] = round_trip
+        if warnings is not None:
+            kwargs["warnings"] = warnings
+        if fallback is not None:
+            kwargs["fallback"] = fallback
+        if serialize_as_any is not None:
+            kwargs["serialize_as_any"] = serialize_as_any
+        return super().model_dump_json(**kwargs)
 
     @classmethod
-    def model_validate_json(cls, json_data: str | bytes, **kwargs: Any) -> "Medallion":
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        extra: Any | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> "Medallion":
         """
         Deserialize medallion from JSON string.
 
         Args:
-            json_data: JSON string or bytes to parse
-            **kwargs: Additional arguments passed to Pydantic's model_validate_json
+            json_data: JSON string, bytes, or bytearray to parse
+            strict: Enable strict mode for validation
+            extra: Extra field handling mode
+            context: Additional context for validation
+            by_alias: Use field aliases
+            by_name: Use field names
 
         Returns:
             Medallion instance
@@ -300,7 +357,14 @@ class Medallion(BaseModel):
         Raises:
             ValidationError: If JSON does not conform to Medallion schema
         """
-        return super().model_validate_json(json_data, **kwargs)
+        return super().model_validate_json(
+            json_data,
+            strict=strict,
+            extra=extra,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
 
 
 class Evidence(BaseModel):
@@ -327,11 +391,11 @@ class Evidence(BaseModel):
     session_summary: str = Field(
         description="High-level description of what happened this session"
     )
-    transcripts: Optional[List[str]] = Field(
+    transcripts: list[str] | None = Field(
         default=None,
         description="Optional list of important conversation segments or planner steps",
     )
-    artefacts: Optional[Dict[str, Any]] = Field(
+    artefacts: dict[str, Any] | None = Field(
         default=None,
         description="Optional structured info (e.g., file diffs, test results)",
     )

@@ -8,6 +8,15 @@ to resume work from previous sessions with consistent state.
 __version__ = "0.1.0"
 
 # Core types
+# LLM interfaces and implementations
+from medallion.llm import MedallionLLM, StubMedallionLLM
+
+# Session helpers
+from medallion.session import checkpoint_session, load_medallions_for_scope
+from medallion.sqlite_store import SQLiteMedallionStore
+
+# Store interfaces and implementations
+from medallion.store import MedallionStore
 from medallion.types import (
     Evidence,
     LLMError,
@@ -17,16 +26,6 @@ from medallion.types import (
     SchemaValidationError,
     StoreError,
 )
-
-# Store interfaces and implementations
-from medallion.store import MedallionStore
-from medallion.sqlite_store import SQLiteMedallionStore
-
-# LLM interfaces and implementations
-from medallion.llm import MedallionLLM, StubMedallionLLM
-
-# Session helpers
-from medallion.session import checkpoint_session, load_medallions_for_scope
 
 __all__ = [
     # Version
@@ -50,4 +49,3 @@ __all__ = [
     "StoreError",
     "LLMError",
 ]
-

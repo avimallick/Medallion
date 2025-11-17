@@ -6,7 +6,6 @@ like creating/updating checkpoints and loading medallions for a scope.
 """
 
 import asyncio
-from typing import List
 
 from medallion.llm import MedallionLLM
 from medallion.store import MedallionStore
@@ -26,8 +25,7 @@ async def _checkpoint_session_async(
     scope: MedallionScope,
     evidence: Evidence,
 ) -> Medallion:
-    """
-    Create or update a medallion for a session (async implementation).
+    """Create or update a medallion for a session (async implementation).
 
     Behavior:
     1. Check if active medallion exists for scope (via get_latest_for_scope)
@@ -39,15 +37,22 @@ async def _checkpoint_session_async(
         store: The medallion store instance
         llm: The LLM helper instance
         scope: The scope for this checkpoint
-        evidence: Evidence data from the session
+        evidence: Evidence data from the session (must have non-empty session_summary)
 
     Returns:
         The created or updated medallion
 
     Raises:
         StoreError: If store operations fail
-        LLMError: If LLM operations fail
+        LLMError: If LLM operations fail or evidence.session_summary is empty/whitespace
         SchemaValidationError: If medallion validation fails
+
+    Edge Cases:
+        - Empty evidence: LLM.generate() and LLM.update() will raise LLMError if
+          evidence.session_summary is empty or whitespace-only
+        - Schema version mismatches: Store preserves all schema versions. Validation
+          happens at application layer via Pydantic. Old schema versions remain readable
+          but new medallions always use current schema version.
     """
     try:
         # Check for existing active medallion
@@ -167,7 +172,7 @@ async def _load_medallions_for_scope_async(
     store: MedallionStore,
     scope: MedallionScope,
     limit: int = 10,
-) -> List[Medallion]:
+) -> list[Medallion]:
     """
     Load medallions matching a scope (async implementation).
 
@@ -196,7 +201,7 @@ def load_medallions_for_scope(
     store: MedallionStore,
     scope: MedallionScope,
     limit: int = 10,
-) -> List[Medallion]:
+) -> list[Medallion]:
     """Load medallions matching a scope (sync wrapper).
 
     Loads medallions that match the given scope using subset matching for

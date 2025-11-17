@@ -7,13 +7,11 @@ interface for persisting and retrieving medallions.
 
 import json
 import sqlite3
-from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any
 
 import aiosqlite
 
-from medallion.store import MedallionStore
 from medallion.types import (
     Medallion,
     MedallionScope,
@@ -61,7 +59,7 @@ class SQLiteMedallionStore:
             StoreError: If database initialization fails
         """
         self.db_path = str(db_path)
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: aiosqlite.Connection | None = None
 
     async def _ensure_initialized(self) -> None:
         """Ensure database connection is open and schema is created."""
@@ -76,6 +74,8 @@ class SQLiteMedallionStore:
 
     async def _create_schema(self) -> None:
         """Create database schema if it doesn't exist."""
+        assert self._conn is not None, "Connection must be initialized"
+
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS medallions (
             id TEXT PRIMARY KEY,
@@ -115,6 +115,7 @@ class SQLiteMedallionStore:
             SchemaValidationError: If medallion schema validation fails
         """
         await self._ensure_initialized()
+        assert self._conn is not None, "Connection must be initialized"
 
         # Validate medallion schema (Pydantic does this on instantiation, but double-check)
         try:
@@ -133,8 +134,13 @@ class SQLiteMedallionStore:
             )
 
         # Serialize scope fields for indexing
-        scope_nodes_json = json.dumps(medallion.scope.graph_nodes)
-        scope_tags_json = json.dumps(medallion.scope.tags)
+        try:
+            scope_nodes_json = json.dumps(medallion.scope.graph_nodes)
+            scope_tags_json = json.dumps(medallion.scope.tags)
+        except (TypeError, ValueError) as e:
+            raise SchemaValidationError(
+                f"Failed to serialize scope fields to JSON: {e}"
+            ) from e
 
         # Format timestamps as ISO 8601 strings
         created_at_str = medallion.meta.created_at.isoformat()
@@ -194,6 +200,7 @@ class SQLiteMedallionStore:
             SchemaValidationError: If medallion schema validation fails
         """
         await self._ensure_initialized()
+        assert self._conn is not None, "Connection must be initialized"
 
         # Validate medallion schema
         try:
@@ -211,11 +218,15 @@ class SQLiteMedallionStore:
             )
 
         # Serialize scope fields
-        scope_nodes_json = json.dumps(medallion.scope.graph_nodes)
-        scope_tags_json = json.dumps(medallion.scope.tags)
+        try:
+            scope_nodes_json = json.dumps(medallion.scope.graph_nodes)
+            scope_tags_json = json.dumps(medallion.scope.tags)
+        except (TypeError, ValueError) as e:
+            raise SchemaValidationError(
+                f"Failed to serialize scope fields to JSON: {e}"
+            ) from e
 
-        # Format timestamps
-        created_at_str = medallion.meta.created_at.isoformat()
+        # Format timestamps (created_at is preserved, not updated)
         updated_at_str = medallion.meta.updated_at.isoformat()
         knowledge_min_str = (
             medallion.meta.knowledge_min_ts.isoformat()
@@ -257,7 +268,7 @@ class SQLiteMedallionStore:
         except sqlite3.Error as e:
             raise StoreError(f"Failed to update medallion: {e}") from e
 
-    async def get_by_id(self, medallion_id: str) -> Optional[Medallion]:
+    async def get_by_id(self, medallion_id: str) -> Medallion | None:
         """
         Fetch a medallion by its ID.
 
@@ -271,6 +282,7 @@ class SQLiteMedallionStore:
             StoreError: If database query fails
         """
         await self._ensure_initialized()
+        assert self._conn is not None, "Connection must be initialized"
 
         try:
             select_sql = "SELECT content_json FROM medallions WHERE id = ?"
@@ -292,7 +304,7 @@ class SQLiteMedallionStore:
         self,
         scope: MedallionScope,
         limit: int = 10,
-    ) -> List[Medallion]:
+    ) -> list[Medallion]:
         """
         Fetch the latest medallions matching the given scope.
 
@@ -312,6 +324,7 @@ class SQLiteMedallionStore:
             StoreError: If database query fails
         """
         await self._ensure_initialized()
+        assert self._conn is not None, "Connection must be initialized"
 
         # Handle edge cases
         if limit <= 0:
@@ -349,7 +362,7 @@ class SQLiteMedallionStore:
                     rows = await cursor.fetchall()
 
             # Filter by scope matching (subset match for graph_nodes, intersection for tags)
-            results: List[Medallion] = []
+            results: list[Medallion] = []
             for row in rows:
                 try:
                     medallion = Medallion.model_validate_json(row[0])
@@ -389,7 +402,12 @@ class SQLiteMedallionStore:
         await self._ensure_initialized()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> None:
         """Async context manager exit (calls close)."""
         await self.close()
 

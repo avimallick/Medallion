@@ -396,6 +396,89 @@ black medallion
 - [Technical Specification](specs/001-medallion-v1/spec.md)
 - [Quick Start Guide](specs/001-medallion-v1/quickstart.md)
 
+## Architecture
+
+### Module Overview
+
+Medallion is organized into modular, composable components:
+
+```
+medallion/
+├── types.py          # Core data models (Medallion, MedallionScope, Evidence)
+├── store.py          # Storage interface (MedallionStore Protocol)
+├── sqlite_store.py   # SQLite storage implementation
+├── llm.py            # LLM interface and stub implementation
+└── session.py        # High-level session helpers (checkpoint, load)
+```
+
+### Component Relationships
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Session Layer                           │
+│  (checkpoint_session, load_medallions_for_scope)            │
+│                  ┌──────────────────┐                        │
+│                  │  session.py      │                        │
+│                  └────────┬─────────┘                        │
+└───────────────────────────┼──────────────────────────────────┘
+                            │
+        ┌───────────────────┴───────────────────┐
+        │                                       │
+┌───────▼────────┐                    ┌────────▼──────┐
+│   Store Layer  │                    │   LLM Layer   │
+│  (SQLiteStore) │                    │  (MedallionLLM)│
+│                │                    │               │
+│  ┌──────────┐  │                    │  ┌──────────┐ │
+│  │store.py  │  │                    │  │  llm.py  │ │
+│  └────┬─────┘  │                    │  └────┬─────┘ │
+│       │        │                    │       │       │
+│  ┌────▼─────┐  │                    │       │       │
+│  │sqlite_   │  │                    │       │       │
+│  │store.py  │  │                    │       │       │
+│  └────┬─────┘  │                    │       │       │
+└───────┼────────┘                    └───────┼───────┘
+        │                                       │
+        │                    ┌──────────────────┘
+        │                    │
+┌───────▼────────────────────▼─────────┐
+│         Data Layer                   │
+│    (Medallion, Evidence, etc.)       │
+│                                      │
+│  ┌──────────────────────────────┐   │
+│  │        types.py              │   │
+│  │  - Medallion (main schema)   │   │
+│  │  - MedallionScope            │   │
+│  │  - Evidence                  │   │
+│  │  - Exceptions                │   │
+│  └──────────────────────────────┘   │
+└──────────────────────────────────────┘
+```
+
+### Data Flow
+
+1. **Checkpoint Creation**:
+   ```
+   Evidence → LLM.generate() → Medallion → Store.create()
+   ```
+
+2. **Checkpoint Update**:
+   ```
+   Evidence → Store.get_latest_for_scope() → LLM.update() → Store.update()
+   ```
+
+3. **Checkpoint Retrieval**:
+   ```
+   MedallionScope → Store.get_latest_for_scope() → List[Medallion]
+   ```
+
+### Design Principles
+
+- **Dependency Injection**: All dependencies (store, LLM) are injected, not hardcoded
+- **Protocol-Based**: Interfaces defined as `typing.Protocol` for flexibility
+- **Async-First**: All I/O operations are async, with sync wrappers for convenience
+- **Framework-Agnostic**: No framework-specific dependencies in core library
+- **Type-Safe**: Strict typing with mypy, Pydantic for runtime validation
+
 ## License
 
 MIT License - see LICENSE file for details.

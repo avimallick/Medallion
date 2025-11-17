@@ -5,7 +5,7 @@ This module defines the abstract Protocol for medallion storage operations.
 Concrete implementations (e.g., SQLiteMedallionStore) must satisfy this interface.
 """
 
-from typing import List, Optional, Protocol
+from typing import Protocol
 
 from medallion.types import Medallion, MedallionScope
 
@@ -39,7 +39,7 @@ class MedallionStore(Protocol):
         """
         ...
 
-    async def get_by_id(self, medallion_id: str) -> Optional[Medallion]:  # pragma: no cover
+    async def get_by_id(self, medallion_id: str) -> Medallion | None:  # pragma: no cover
         """
         Fetch a medallion by its ID.
 
@@ -58,7 +58,7 @@ class MedallionStore(Protocol):
         self,
         scope: MedallionScope,
         limit: int = 10,
-    ) -> List[Medallion]:  # pragma: no cover
+    ) -> list[Medallion]:  # pragma: no cover
         """
         Fetch the latest medallions matching the given scope.
 
