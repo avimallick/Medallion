@@ -17,7 +17,7 @@ Medallion provides a framework-agnostic way to create, persist, and retrieve sem
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/medallion.git
+git clone https://github.com/avimallick/medallion.git
 cd medallion
 pip install -e .
 ```
